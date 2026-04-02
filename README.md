@@ -2,7 +2,6 @@
 
 > **Personalized medicine powered by genomics + AI**
 
-Demo : [pharmaguard-rift-ten.vercel.app](https://pharmaguard-rift-ten.vercel.app/)
 
 PharmaGuard is an AI-powered clinical decision support system that analyzes **patient genetic variants (VCF files)** to predict **drug response risks**, generate **CPIC-aligned dosing recommendations**, and provide **LLM-generated clinical explanations**.
 
