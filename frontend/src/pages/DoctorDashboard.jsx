@@ -850,7 +850,7 @@ function VCFPage() {
   // Detected variants — from all results combined
   const allVariants = results.flatMap(r =>
     (r.pharmacogenomic_profile || []).flatMap(p =>
-      (p.variants || []).map(v => ({ gene: p.primary_gene, rsid: v }))
+      (p.detected_variants || p.variants || []).map(v => ({ gene: p.primary_gene, rsid: v.rsid || v }))
     )
   );
 
@@ -1070,7 +1070,7 @@ function VCFPage() {
                         <div>
                           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Total Variants</div>
                           <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--text-primary)' }}>
-                            {activeResult.pharmacogenomic_profile?.reduce((s, p) => s + (p.variants?.length || 0), 0) || allVariants.length || '—'}
+                            {activeResult.pharmacogenomic_profile?.reduce((s, p) => s + ((p.detected_variants || p.variants)?.length || 0), 0) || allVariants.length || '—'}
                           </div>
                         </div>
                         <div>
