@@ -263,7 +263,7 @@ def process_vcf(vcf_file, drug):
             primary_gene=primary_gene,
             diplotype=diplotype,
             phenotype=phenotype if phenotype in ["PM","IM","NM","RM","URM"] else "Unknown",
-            detected_variants=[DetectedVariant(rsid=v["rsid"], gene=str(v.get("gene") or "Unknown")) for v in variants]
+            detected_variants=[DetectedVariant(rsid=v["rsid"], gene=str(v.get("gene") or primary_gene)) for v in gene_variants]
         )],
 
         clinical_recommendation=ClinicalRecommendation(

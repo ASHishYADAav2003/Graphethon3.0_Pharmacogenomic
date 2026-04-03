@@ -848,11 +848,24 @@ function VCFPage() {
   };
 
   // Detected variants — from all results combined
-  const allVariants = results.flatMap(r =>
+  const rawVariants = results.flatMap(r =>
     (r.pharmacogenomic_profile || []).flatMap(p =>
-      (p.detected_variants || p.variants || []).map(v => ({ gene: p.primary_gene, rsid: v.rsid || v }))
+      (p.detected_variants || p.variants || []).map(v => ({ 
+        gene: (v.gene && v.gene !== 'Unknown') ? v.gene : p.primary_gene, 
+        rsid: v.rsid || v 
+      }))
     )
   );
+
+  // Deduplicate variants
+  const uniqueRSIDs = new Set();
+  const allVariants = [];
+  rawVariants.forEach(v => {
+    if (!uniqueRSIDs.has(v.rsid)) {
+      uniqueRSIDs.add(v.rsid);
+      allVariants.push(v);
+    }
+  });
 
   return (
     <div className="animate-up" style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
@@ -1141,13 +1154,13 @@ function VCFPage() {
                       <div className="card-header">
                         <span className="card-title">⊞ Detected Variants</span>
                       </div>
-                      <div style={{ padding: '0 4px' }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', padding: '8px 16px', borderBottom: '1px solid var(--border-subtle)' }}>
+                      <div style={{ padding: '0 4px', maxHeight: '400px', overflowY: 'auto' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', padding: '8px 16px', borderBottom: '1px solid var(--border-subtle)', position: 'sticky', top: 0, background: 'var(--bg-elevated)', zIndex: 10 }}>
                           <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>GENE</span>
                           <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>⊞ RSID</span>
                         </div>
                         <div className="variants-list">
-                          {allVariants.slice(0, 9).map((v, i) => (
+                          {allVariants.map((v, i) => (
                             <div key={i} className="variant-row">
                               <div className="variant-gene">
                                 <span className="variant-gene-icon">⊠</span>
@@ -1158,8 +1171,8 @@ function VCFPage() {
                             </div>
                           ))}
                         </div>
-                        <div style={{ padding: '8px 16px', fontSize: 12, color: 'var(--text-muted)' }}>
-                          Showing {Math.min(allVariants.length, 9)} variants
+                        <div style={{ padding: '8px 16px', fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>
+                          Showing all {allVariants.length} variants found in VCF ({results.length} drug analyses combined)
                         </div>
                       </div>
                     </div>
