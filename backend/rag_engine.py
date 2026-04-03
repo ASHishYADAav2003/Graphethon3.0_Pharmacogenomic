@@ -117,7 +117,7 @@ def semantic_search(
             "score": round(score, 4),
             "doc_type": doc.doc_type,
             "content": doc.content[:500],
-            "metadata": doc.metadata,
+            "metadata": doc.doc_metadata,
             "patient_id": doc.patient_id
         }
         for score, doc in top_docs if score > 0

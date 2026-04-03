@@ -4,8 +4,6 @@ import { Routes, Route, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import BlockchainBadge from '../components/BlockchainBadge';
 import RAGChat from '../components/RAGChat';
-import VCFUploader from '../components/VCFUploader';
-import DrugSelector from '../components/DrugSelector';
 
 // ── Risk helpers ──────────────────────────────────────────────
 function RiskBadge({ risk }) {
@@ -426,22 +424,72 @@ function PatientDetail() {
 
 // ── VCF Analysis Tab ───────────────────────────────────────────
 function VCFAnalysisTab({ patientId, existingAnalyses }) {
-  const { authFetch } = useAuth();
+  const { authFetch, BASE_URL, token } = useAuth();
+  const fileInputRef = React.useRef(null);
   const [vcfFile, setVcfFile] = useState(null);
-  const [selectedDrugs, setSelectedDrugs] = useState([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [scanStatus, setScanStatus] = useState(null);
+  const [scanError, setScanError] = useState('');
   const [availableDrugs, setAvailableDrugs] = useState([]);
   const [unavailableDrugs, setUnavailableDrugs] = useState([]);
-  const [isScanning, setIsScanning] = useState(false);
+  const [selectedDrugs, setSelectedDrugs] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [results, setResults] = useState([]);
   const [error, setError] = useState('');
+
+  const handleFile = async (file) => {
+    if (!file) return;
+    setVcfFile(file);
+    setScanStatus('scanning');
+    setScanError('');
+    setAvailableDrugs([]);
+    setUnavailableDrugs([]);
+    setSelectedDrugs([]);
+    setResults([]);
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const res = await fetch(`${BASE_URL}/detect_drugs/`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // Backend returns [{drug,gene,variants_found}] — extract name strings
+        setAvailableDrugs((data.available_drugs || []).map(d => typeof d === 'string' ? d : d.drug));
+        setUnavailableDrugs((data.unavailable_drugs || []).map(d => typeof d === 'string' ? d : d.drug));
+        setScanStatus('done');
+      } else {
+        setScanStatus('error');
+        setScanError('Server could not process this VCF file.');
+      }
+    } catch (e) {
+      setScanStatus('error');
+      setScanError('Network error — check backend is running.');
+    }
+  };
+
+  const removeFile = () => {
+    setVcfFile(null);
+    setScanStatus(null);
+    setScanError('');
+    setAvailableDrugs([]);
+    setUnavailableDrugs([]);
+    setSelectedDrugs([]);
+    setResults([]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const toggleDrug = (drug) => {
+    setSelectedDrugs(prev => prev.includes(drug) ? prev.filter(d => d !== drug) : [...prev, drug]);
+  };
 
   const runAnalysis = async () => {
     if (!vcfFile || selectedDrugs.length === 0) return;
     setIsLoading(true);
     setError('');
     const newResults = [];
-
     for (const drug of selectedDrugs) {
       const fd = new FormData();
       fd.append('file', vcfFile);
@@ -455,20 +503,76 @@ function VCFAnalysisTab({ patientId, existingAnalyses }) {
     setIsLoading(false);
   };
 
+  const fmt = (bytes) => {
+    if (!bytes) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1048576).toFixed(1)} MB`;
+  };
+
   return (
     <div>
       <div className="grid-2" style={{ gap: 20 }}>
         <div className="card">
-          <div className="card-header"><span className="card-title">Upload & Analyze VCF</span></div>
-          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <VCFUploader
-              onFileSelected={f => { setVcfFile(f); if (!f) { setAvailableDrugs([]); setUnavailableDrugs([]); } else setIsScanning(true); }}
-              selectedFile={vcfFile}
-              onDrugsDetected={(a, u) => { setAvailableDrugs(a); setUnavailableDrugs(u); setIsScanning(false); }}
-            />
-            <DrugSelector availableDrugs={availableDrugs} unavailableDrugs={unavailableDrugs} onDrugsSelected={setSelectedDrugs} disabled={!vcfFile} />
+          <div className="card-header"><span className="card-title">🧬 Upload & Analyze VCF</span></div>
+          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* Drop zone */}
+            {!vcfFile && (
+              <div
+                style={{ border: `2px dashed ${isDragging ? 'var(--accent-cyan)' : 'var(--border-default)'}`, borderRadius: 'var(--radius-md)', padding: '32px 16px', textAlign: 'center', cursor: 'pointer', background: isDragging ? 'rgba(6,182,212,0.05)' : 'var(--bg-secondary)', transition: 'all 0.2s', userSelect: 'none' }}
+                onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={(e) => { e.preventDefault(); setIsDragging(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+              >
+                <div style={{ fontSize: 32, marginBottom: 10, filter: 'drop-shadow(0 0 8px rgba(6,182,212,0.4))' }}>🧬</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>Drop VCF file here or click to browse</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>.vcf or .vcf.gz supported</div>
+              </div>
+            )}
+            {/* File card */}
+            {vcfFile && (
+              <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: '1px solid var(--border-subtle)' }}>
+                  <span style={{ fontSize: 22 }}>📄</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{vcfFile.name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{fmt(vcfFile.size)}</div>
+                  </div>
+                  <button onClick={removeFile} style={{ background: 'transparent', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13, padding: '3px 8px' }}>✕</button>
+                </div>
+                {scanStatus === 'scanning' && (
+                  <div style={{ padding: '10px 14px', background: 'rgba(6,182,212,0.05)', display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--accent-cyan)' }}>
+                    <div className="spinner" /><span>Scanning VCF for pharmacogenes…</span>
+                  </div>
+                )}
+                {scanStatus === 'done' && (
+                  <div style={{ padding: '10px 14px', background: 'rgba(16,185,129,0.06)', fontSize: 12, color: 'var(--accent-emerald)', fontWeight: 600 }}>
+                    {availableDrugs.length} drugs available for analysis
+                  </div>
+                )}
+                {scanStatus === 'error' && (
+                  <div style={{ padding: '10px 14px', background: 'rgba(244,63,94,0.06)', fontSize: 12, color: 'var(--accent-rose)', fontWeight: 600 }}>⚠️ {scanError}</div>
+                )}
+              </div>
+            )}
+            {/* Hidden file input — ref-based, no global id */}
+            <input ref={fileInputRef} type="file" accept=".vcf,.gz" style={{ display: 'none' }}
+              onChange={(e) => { if (e.target.files && e.target.files[0]) handleFile(e.target.files[0]); }} />
+            {/* Drug selection */}
+            {availableDrugs.length > 0 && (
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8 }}>SELECT DRUGS ({selectedDrugs.length} selected)</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {availableDrugs.map(drug => (
+                    <button key={drug} onClick={() => toggleDrug(drug)} style={{ padding: '5px 12px', borderRadius: 'var(--radius-full)', fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s', background: selectedDrugs.includes(drug) ? 'rgba(6,182,212,0.15)' : 'var(--bg-elevated)', border: selectedDrugs.includes(drug) ? '1px solid var(--accent-cyan)' : '1px solid var(--border-default)', color: selectedDrugs.includes(drug) ? 'var(--accent-cyan)' : 'var(--text-secondary)' }}>{drug}</button>
+                  ))}
+                </div>
+                {unavailableDrugs.length > 0 && <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>No data for: {unavailableDrugs.join(', ')}</div>}
+              </div>
+            )}
             {error && <div style={{ color: 'var(--accent-rose)', fontSize: 12 }}>⚠️ {error}</div>}
-            <button className="btn btn-primary" onClick={runAnalysis} disabled={!vcfFile || selectedDrugs.length === 0 || isLoading || isScanning}>
+            <button className="btn btn-primary" onClick={runAnalysis} disabled={!vcfFile || selectedDrugs.length === 0 || isLoading || scanStatus === 'scanning'}>
               {isLoading ? <><div className="spinner" /> Analyzing...</> : `🧬 Analyze ${selectedDrugs.length} Drug${selectedDrugs.length !== 1 ? 's' : ''} & Save`}
             </button>
           </div>
@@ -491,8 +595,6 @@ function VCFAnalysisTab({ patientId, existingAnalyses }) {
           </div>
         </div>
       </div>
-
-      {/* Historical analyses */}
       {existingAnalyses?.length > 0 && (
         <div className="card" style={{ marginTop: 16 }}>
           <div className="card-header"><span className="card-title">Past Analyses ({existingAnalyses.length})</span></div>
@@ -609,17 +711,84 @@ function AddRecordModal({ patientId, onClose, onSave, authFetch }) {
 
 // ── VCF Standalone Page ────────────────────────────────────────
 function VCFPage() {
-  const { authFetch } = useAuth();
+  const { BASE_URL, token } = useAuth();
+  const fileInputRef = React.useRef(null);
   const [vcfFile, setVcfFile] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [scanStatus, setScanStatus] = useState(null); // null|'scanning'|'done'|'error'
+  const [scanError, setScanError] = useState('');
   const [selectedDrugs, setSelectedDrugs] = useState([]);
   const [availableDrugs, setAvailableDrugs] = useState([]);
   const [unavailableDrugs, setUnavailableDrugs] = useState([]);
-  const [isScanning, setIsScanning] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [results, setResults] = useState([]);
-  const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
-  const { token } = useAuth();
+  const [activeResultDrug, setActiveResultDrug] = useState(null);
+  const [viewMode, setViewMode] = useState('patient');
+  const [recentAnalyses] = useState([
+    { name: 'PATIENT_001', sub: '3 drugs • risk', date: new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) },
+    { name: 'PATIENT_001', sub: '2 drugs • risk', date: new Date(Date.now() - 86400000).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) },
+  ]);
+
+  const handleFile = async (file) => {
+    if (!file) return;
+    setVcfFile(file);
+    setScanStatus('scanning');
+    setScanError('');
+    setAvailableDrugs([]);
+    setUnavailableDrugs([]);
+    setSelectedDrugs([]);
+    setResults([]);
+    setActiveResultDrug(null);
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const res = await fetch(`${BASE_URL}/detect_drugs/`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // Backend returns [{drug,gene,variants_found}] — extract name strings
+        setAvailableDrugs((data.available_drugs || []).map(d => typeof d === 'string' ? d : d.drug));
+        setUnavailableDrugs((data.unavailable_drugs || []).map(d => typeof d === 'string' ? d : d.drug));
+        setScanStatus('done');
+      } else {
+        setScanStatus('error');
+        setScanError('Could not process this VCF file.');
+      }
+    } catch (e) {
+      setScanStatus('error');
+      setScanError('Network error — check backend is running.');
+    }
+  };
+
+  const removeFile = () => {
+    setVcfFile(null);
+    setScanStatus(null);
+    setScanError('');
+    setAvailableDrugs([]);
+    setUnavailableDrugs([]);
+    setSelectedDrugs([]);
+    setResults([]);
+    setActiveResultDrug(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const toggleDrug = (drug) => {
+    setSelectedDrugs(prev => prev.includes(drug) ? prev.filter(d => d !== drug) : [...prev, drug]);
+  };
+
+  const fmt = (bytes) => {
+    if (!bytes) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1048576) return `${(bytes/1024).toFixed(1)} KB`;
+    return `${(bytes/1048576).toFixed(1)} MB`;
+  };
+
+  // Derive current step
+  const currentStep = !vcfFile ? 1 : scanStatus === 'scanning' ? 1 : availableDrugs.length === 0 ? 2 : selectedDrugs.length === 0 ? 3 : results.length > 0 ? 4 : 3;
 
   const runAnalysis = async () => {
     if (!vcfFile || selectedDrugs.length === 0) return;
@@ -630,43 +799,397 @@ function VCFPage() {
       const fd = new FormData();
       fd.append('file', vcfFile);
       try {
-        const r = await fetch(`${BASE_URL}/process_vcf/?drug=${drug}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
+        const r = await fetch(`${BASE_URL}/process_vcf/?drug=${drug}`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: fd,
+        });
         if (r.ok) newResults.push({ ...(await r.json()), _drug: drug });
         else newResults.push({ _drug: drug, error: 'Failed' });
-      } catch (e) { newResults.push({ _drug: drug, error: e.message }); }
+      } catch (e) {
+        newResults.push({ _drug: drug, error: e.message });
+      }
     }
     setResults(newResults);
     setIsLoading(false);
+    if (newResults.length > 0) setActiveResultDrug(newResults[0]._drug || newResults[0].drug);
   };
 
+  const activeResult = results.find(r => (r._drug || r.drug) === activeResultDrug);
+  const allGenes = ['CYP2D6', 'CYP2C19', 'CYP2C9', 'SLC01B1', 'TPMT', 'DPYD'];
+
+  // Build risk matrix from results
+  const riskMatrix = {};
+  allGenes.forEach(gene => { riskMatrix[gene] = {}; });
+  results.forEach(r => {
+    const drug = r._drug || r.drug;
+    const profiles = r.pharmacogenomic_profile || [];
+    profiles.forEach(p => {
+      if (riskMatrix[p.primary_gene]) {
+        riskMatrix[p.primary_gene][drug] = r.risk_assessment?.risk_label || 'No PGx Data';
+      }
+    });
+  });
+
+  const getRiskClass = (label) => {
+    if (!label || label === 'No PGx Data') return 'nopgx';
+    if (label === 'Safe') return 'safe';
+    if (label === 'Adjust Dosage') return 'adjust';
+    if (label === 'Toxic') return 'toxic';
+    return 'nopgx';
+  };
+
+  const getRiskIcon = (label) => {
+    if (!label || label === 'No PGx Data') return '—';
+    if (label === 'Safe') return '✓';
+    if (label === 'Adjust Dosage') return '⚠';
+    if (label === 'Toxic') return '✕';
+    return '—';
+  };
+
+  // Detected variants — from all results combined
+  const allVariants = results.flatMap(r =>
+    (r.pharmacogenomic_profile || []).flatMap(p =>
+      (p.variants || []).map(v => ({ gene: p.primary_gene, rsid: v }))
+    )
+  );
+
   return (
-    <div className="animate-up">
-      <div className="page-header"><h2 className="page-title">🧬 Standalone VCF Analyzer</h2><p className="page-subtitle">Upload a VCF file without associating to a patient</p></div>
-      <div className="grid-2" style={{ gap: 20 }}>
+    <div className="animate-up" style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+      {/* ── Left Panel: Analysis Console ── */}
+      <div style={{ width: 340, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* Step indicator */}
         <div className="card">
-          <div className="card-header"><span className="card-title">Analysis Console</span></div>
-          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <VCFUploader onFileSelected={f => { setVcfFile(f); if (!f) { setAvailableDrugs([]); } else setIsScanning(true); }} selectedFile={vcfFile} onDrugsDetected={(a, u) => { setAvailableDrugs(a); setUnavailableDrugs(u); setIsScanning(false); }} />
-            <DrugSelector availableDrugs={availableDrugs} unavailableDrugs={unavailableDrugs} onDrugsSelected={setSelectedDrugs} disabled={!vcfFile} />
-            <button className="btn btn-primary" onClick={runAnalysis} disabled={!vcfFile || selectedDrugs.length === 0 || isLoading}>{isLoading ? <><div className="spinner" /> Analyzing...</> : 'Run Analysis'}</button>
+          <div className="card-header">
+            <span className="card-title">🔬 Analysis Console</span>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Configure your pharmacogenomic analysis</span>
           </div>
-        </div>
-        <div className="card">
-          <div className="card-header"><span className="card-title">Results</span></div>
-          <div className="card-body">
-            {results.map((r, i) => (
-              <div key={i} style={{ padding: 12, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', marginBottom: 10 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <strong>{r.drug || r._drug}</strong>
-                  {r.risk_assessment && <RiskBadge risk={r.risk_assessment.risk_label} />}
+          <div className="card-body" style={{ paddingBottom: 8 }}>
+            <div className="analysis-steps">
+              {[
+                [1, 'Upload VCF'],
+                [2, 'Detect Genes'],
+                [3, 'Select Drugs'],
+                [4, 'View Results'],
+              ].map(([n, label]) => (
+                <div key={n} className={`analysis-step${currentStep === n ? ' active' : currentStep > n ? ' done' : ''}`}>
+                  <div className="analysis-step-num">{currentStep > n ? '✓' : n}</div>
+                  <span>{label}</span>
                 </div>
-                {r.pharmacogenomic_profile?.[0] && <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{r.pharmacogenomic_profile[0].primary_gene} {r.pharmacogenomic_profile[0].diplotype} · {r.pharmacogenomic_profile[0].phenotype}</div>}
-                {r.clinical_recommendation && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>{r.clinical_recommendation.recommendation}</div>}
-              </div>
-            ))}
-            {results.length === 0 && <div className="empty-state"><div className="empty-icon">🧬</div><div className="empty-title">Results appear here</div></div>}
+              ))}
+            </div>
           </div>
         </div>
+
+        {/* VCF Upload + Drug Selection — inline, self-contained */}
+        <div className="card">
+          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* Drop zone */}
+            {!vcfFile && (
+              <div
+                style={{ border: `2px dashed ${isDragging ? 'var(--accent-cyan)' : 'var(--border-default)'}`, borderRadius: 'var(--radius-md)', padding: '28px 16px', textAlign: 'center', cursor: 'pointer', background: isDragging ? 'rgba(6,182,212,0.05)' : 'var(--bg-secondary)', transition: 'all 0.2s', userSelect: 'none' }}
+                onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={(e) => { e.preventDefault(); setIsDragging(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+              >
+                <div style={{ fontSize: 28, marginBottom: 8, filter: 'drop-shadow(0 0 8px rgba(6,182,212,0.4))' }}>🧬</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>Drop VCF file here or click to browse</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>.vcf or .vcf.gz supported</div>
+              </div>
+            )}
+            {/* File card */}
+            {vcfFile && (
+              <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderBottom: '1px solid var(--border-subtle)' }}>
+                  <span style={{ fontSize: 20 }}>📄</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{vcfFile.name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{fmt(vcfFile.size)}</div>
+                  </div>
+                  <button onClick={removeFile} style={{ background: 'transparent', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12, padding: '2px 7px' }}>✕</button>
+                </div>
+                {scanStatus === 'scanning' && (
+                  <div style={{ padding: '8px 12px', background: 'rgba(6,182,212,0.05)', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--accent-cyan)' }}>
+                    <div className="spinner" /><span>Scanning pharmacogenes…</span>
+                  </div>
+                )}
+                {scanStatus === 'done' && (
+                  <div style={{ padding: '8px 12px', background: 'rgba(16,185,129,0.06)', fontSize: 12, color: 'var(--accent-emerald)', fontWeight: 600 }}>✅ {availableDrugs.length} drugs detected</div>
+                )}
+                {scanStatus === 'error' && (
+                  <div style={{ padding: '8px 12px', background: 'rgba(244,63,94,0.06)', fontSize: 12, color: 'var(--accent-rose)', fontWeight: 600 }}>⚠️ {scanError}</div>
+                )}
+              </div>
+            )}
+            {/* Hidden file input */}
+            <input ref={fileInputRef} type="file" accept=".vcf,.gz" style={{ display: 'none' }}
+              onChange={(e) => { if (e.target.files && e.target.files[0]) handleFile(e.target.files[0]); }} />
+            {/* Drug pills */}
+            {availableDrugs.length > 0 && (
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>SELECT DRUGS ({selectedDrugs.length} selected)</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                  {availableDrugs.map(drug => (
+                    <button key={drug} onClick={() => toggleDrug(drug)} style={{ padding: '4px 10px', borderRadius: 'var(--radius-full)', fontSize: 11, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s', background: selectedDrugs.includes(drug) ? 'rgba(6,182,212,0.15)' : 'var(--bg-elevated)', border: selectedDrugs.includes(drug) ? '1px solid var(--accent-cyan)' : '1px solid var(--border-default)', color: selectedDrugs.includes(drug) ? 'var(--accent-cyan)' : 'var(--text-secondary)' }}>{drug}</button>
+                  ))}
+                </div>
+                {unavailableDrugs.length > 0 && <div style={{ marginTop: 6, fontSize: 10, color: 'var(--text-muted)' }}>No data: {unavailableDrugs.join(', ')}</div>}
+              </div>
+            )}
+            {error && <div style={{ color: 'var(--accent-rose)', fontSize: 12 }}>⚠️ {error}</div>}
+            <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }} onClick={runAnalysis}
+              disabled={!vcfFile || selectedDrugs.length === 0 || isLoading || scanStatus === 'scanning'}>
+              {isLoading ? <><div className="spinner" /> Analyzing...</> : `▶ Analyze ${selectedDrugs.length || 0} Drug${selectedDrugs.length !== 1 ? 's' : ''} →`}
+            </button>
+          </div>
+        </div>
+
+        {/* Recent Analyses */}
+        <div className="card">
+          <div className="card-header"><span className="card-title">Recent Analyses</span></div>
+          <div className="card-body" style={{ padding: '8px 0' }}>
+            <div className="recent-analyses-list">
+              {recentAnalyses.map((a, i) => (
+                <div key={i} className="recent-analysis-item">
+                  <div className="recent-analysis-dot" />
+                  <div style={{ flex: 1 }}>
+                    <div className="recent-analysis-name">{a.name}</div>
+                    <div className="recent-analysis-sub">{a.sub}</div>
+                  </div>
+                  <div className="recent-analysis-date">{a.date}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Right Panel: Results ── */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {results.length === 0 ? (
+          <div className="card" style={{ flex: 1 }}>
+            <div className="card-body">
+              <div className="empty-state" style={{ padding: 80 }}>
+                <div className="empty-icon" style={{ fontSize: 56, opacity: 0.4 }}>🧬</div>
+                <div className="empty-title">Upload a VCF file to begin analysis</div>
+                <div className="empty-desc">Select drugs and click Analyze to see your pharmacogenomic report</div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Drug tabs */}
+            <div className="card">
+              <div className="result-drug-tabs">
+                {results.map(r => {
+                  const drug = r._drug || r.drug;
+                  return (
+                    <button
+                      key={drug}
+                      className={`result-drug-tab${activeResultDrug === drug ? ' active' : ''}`}
+                      onClick={() => { setActiveResultDrug(drug); setViewMode('patient'); }}
+                    >
+                      🧬 {drug}
+                    </button>
+                  );
+                })}
+                <button
+                  className={`result-drug-tab${viewMode === 'matrix' ? ' active' : ''}`}
+                  onClick={() => setViewMode('matrix')}
+                >
+                  ⊞ Risk Matrix
+                </button>
+              </div>
+
+              {viewMode === 'matrix' ? (
+                /* ── Gene × Drug Risk Matrix ── */
+                <div className="card-body">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <span className="card-title">⊞ Gene × Drug Risk Matrix</span>
+                    <button className="btn btn-ghost btn-sm">⬇ Export PNG</button>
+                  </div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="risk-matrix-table">
+                      <thead>
+                        <tr>
+                          <th style={{ textAlign: 'left' }}>GENE</th>
+                          {results.map(r => <th key={r._drug || r.drug}>{r._drug || r.drug}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {allGenes.map(gene => (
+                          <tr key={gene}>
+                            <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 13, color: 'var(--text-primary)', paddingLeft: 8 }}>
+                              ⊠ {gene}
+                            </td>
+                            {results.map(r => {
+                              const drug = r._drug || r.drug;
+                              const label = riskMatrix[gene]?.[drug];
+                              const cls = getRiskClass(label);
+                              return (
+                                <td key={drug}>
+                                  <div className={`risk-matrix-cell ${cls}`}>
+                                    <span className="cell-icon">{getRiskIcon(label)}</span>
+                                    <span>{label || 'No PGx Data'}</span>
+                                  </div>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{ marginTop: 16, display: 'flex', gap: 16, fontSize: 12, color: 'var(--text-muted)' }}>
+                    <span style={{ color: 'var(--accent-emerald)' }}>✓ Safe</span>
+                    <span style={{ color: 'var(--accent-amber)' }}>⚠ Adjust Dosage</span>
+                    <span style={{ color: 'var(--text-muted)' }}>— No PGx Data</span>
+                  </div>
+                </div>
+              ) : activeResult ? (
+                /* ── Patient Result View ── */
+                <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  {/* Patient Record */}
+                  <div className="card" style={{ background: 'var(--bg-elevated)' }}>
+                    <div className="card-body">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                        <div style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--bg-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>📋</div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Patient Record</div>
+                          <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                            {activeResult.patient_id || activeResult.filename?.replace('.vcf', '') || 'PATIENT_001'}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>🕐 {new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' })}</span>
+                          <span className="badge badge-safe">✓ Verified</span>
+                        </div>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                        <div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Total Variants</div>
+                          <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--text-primary)' }}>
+                            {activeResult.pharmacogenomic_profile?.reduce((s, p) => s + (p.variants?.length || 0), 0) || allVariants.length || '—'}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Genes Analyzed</div>
+                          <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--text-primary)' }}>
+                            {activeResult.pharmacogenomic_profile?.length || 1}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Risk + Recommendation */}
+                  <div className="grid-2" style={{ gap: 12 }}>
+                    <div className="card" style={{
+                      background: activeResult.risk_assessment?.risk_label === 'Safe'
+                        ? 'rgba(16,185,129,0.08)' : activeResult.risk_assessment?.risk_label === 'Adjust Dosage'
+                        ? 'rgba(245,158,11,0.08)' : 'var(--bg-elevated)',
+                      border: '1px solid ' + (activeResult.risk_assessment?.risk_label === 'Safe'
+                        ? 'rgba(16,185,129,0.3)' : activeResult.risk_assessment?.risk_label === 'Adjust Dosage'
+                        ? 'rgba(245,158,11,0.3)' : 'var(--border-subtle)'),
+                      padding: 16,
+                    }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>RISK ASSESSMENT</div>
+                      <div style={{ fontSize: 26, fontWeight: 900, color: activeResult.risk_assessment?.risk_label === 'Safe' ? 'var(--accent-emerald)' : activeResult.risk_assessment?.risk_label === 'Adjust Dosage' ? 'var(--accent-amber)' : 'var(--text-primary)' }}>
+                        {activeResult.risk_assessment?.risk_label || 'Unknown'}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Overall Risk Level</div>
+                    </div>
+                    <div className="card" style={{ background: 'rgba(6,182,212,0.06)', border: '1px solid rgba(6,182,212,0.2)', padding: 16 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--accent-cyan)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>💊</div>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>Clinical Recommendation</div>
+                          <span style={{ fontSize: 10, color: 'var(--accent-amber)', fontWeight: 600 }}>Priority</span>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{activeResult.clinical_recommendation?.recommendation || 'Standard dosing.'}</div>
+                      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                        <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}>🖨 Print Report</button>
+                        <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}>📋 Copy JSON</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Pharmacogenomic Profile */}
+                  {activeResult.pharmacogenomic_profile?.map((p, pi) => (
+                    <div key={pi} className="card" style={{ background: 'var(--bg-elevated)' }}>
+                      <div className="card-header">
+                        <span className="card-title">⊠ Pharmacogenomic Profile</span>
+                      </div>
+                      <div className="card-body">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 18, color: 'var(--text-primary)' }}>{p.primary_gene}</div>
+                          <span className="badge badge-safe" style={{ fontSize: 12 }}>🟢 {p.phenotype}</span>
+                          <div style={{ display: 'flex', gap: 16, marginLeft: 'auto', fontSize: 13 }}>
+                            <div><span style={{ color: 'var(--text-muted)' }}>Diplotype: </span><span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{p.diplotype}</span></div>
+                            <div><span style={{ color: 'var(--text-muted)' }}>Phenotype: </span><span style={{ color: 'var(--accent-emerald)', fontWeight: 700 }}>{p.phenotype}</span></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Detected Variants */}
+                  {allVariants.length > 0 && (
+                    <div className="card">
+                      <div className="card-header">
+                        <span className="card-title">⊞ Detected Variants</span>
+                      </div>
+                      <div style={{ padding: '0 4px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', padding: '8px 16px', borderBottom: '1px solid var(--border-subtle)' }}>
+                          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>GENE</span>
+                          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>⊞ RSID</span>
+                        </div>
+                        <div className="variants-list">
+                          {allVariants.slice(0, 9).map((v, i) => (
+                            <div key={i} className="variant-row">
+                              <div className="variant-gene">
+                                <span className="variant-gene-icon">⊠</span>
+                                {v.gene}
+                              </div>
+                              <div className="variant-rsid">{v.rsid}</div>
+                              <button className="variant-expand">∨</button>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{ padding: '8px 16px', fontSize: 12, color: 'var(--text-muted)' }}>
+                          Showing {Math.min(allVariants.length, 9)} variants
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* AI Clinical Analysis */}
+                  <div className="ai-analysis-card">
+                    <div className="ai-analysis-header">
+                      <div className="ai-avatar">🤖</div>
+                      <div>
+                        <div className="ai-analysis-title">AI Clinical Analysis</div>
+                        <div className="ai-analysis-subtitle">Generated by PharmaGuard AI</div>
+                      </div>
+                    </div>
+                    <div className="ai-analysis-text">
+                      {activeResult.pharmacogenomic_profile?.[0]
+                        ? `${activeResult.pharmacogenomic_profile[0].primary_gene} ${activeResult.pharmacogenomic_profile[0].diplotype || ''} results in ${activeResult.pharmacogenomic_profile[0].phenotype || 'NM'} phenotype affecting ${activeResultDrug}.`
+                        : `Analysis complete for ${activeResultDrug}. ${activeResult.clinical_recommendation?.recommendation || 'Review clinical recommendations above.'}`
+                      }
+                    </div>
+                    <div className="ai-analysis-badges">
+                      <span className="ai-badge evidence">👤 Evidence-based</span>
+                      <span className="ai-badge updated">🟡 Updated daily</span>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

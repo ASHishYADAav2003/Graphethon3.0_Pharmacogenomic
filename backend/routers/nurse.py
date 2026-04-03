@@ -2,8 +2,10 @@
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, date
 import json
+import random
+import string
 
 from database import get_db, Patient, VitalSign, NurseReport, User
 from auth import get_nurse, get_current_user, decode_token
@@ -12,6 +14,23 @@ from rag_engine import index_document
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/nurse", tags=["Nurse"])
+
+
+# ── Add Patient Schema ─────────────────────────────────────────
+
+class AddPatientRequest(BaseModel):
+    full_name: str
+    age: Optional[int] = None
+    gender: Optional[str] = "Unknown"
+    blood_type: Optional[str] = None
+    allergies: Optional[str] = None
+    chronic_conditions: Optional[str] = None
+    # Initial vitals (optional)
+    heart_rate: Optional[float] = None
+    systolic_bp: Optional[float] = None
+    diastolic_bp: Optional[float] = None
+    oxygen_saturation: Optional[float] = None
+
 
 
 # ── WebSocket Connection Manager ──────────────────────────────
@@ -100,6 +119,117 @@ def list_nurse_patients(
             } if latest else None
         })
     return result
+
+
+# ── Add new patient ───────────────────────────────────────────
+
+@router.post("/patients")
+def add_patient(
+    data: AddPatientRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_nurse)
+):
+    # Generate unique patient code e.g. PT10045
+    suffix = ''.join(random.choices(string.digits, k=5))
+    patient_code = f"PT{suffix}"
+    while db.query(Patient).filter(Patient.patient_code == patient_code).first():
+        suffix = ''.join(random.choices(string.digits, k=5))
+        patient_code = f"PT{suffix}"
+
+    # Auto-generate username from name
+    base_username = data.full_name.lower().replace(" ", "_")
+    username = base_username
+    counter = 1
+    while db.query(User).filter(User.username == username).first():
+        username = f"{base_username}{counter}"
+        counter += 1
+
+    # Auto-generate email
+    email = f"{username}@pharmaguard.local"
+    while db.query(User).filter(User.email == email).first():
+        email = f"{username}{random.randint(100,999)}@pharmaguard.local"
+
+    # Create User account (hashed password = changeme123)
+    from auth import hash_password
+    new_user = User(
+        username=username,
+        email=email,
+        hashed_password=hash_password("changeme123"),
+        role="patient",
+        full_name=data.full_name,
+        is_active=True
+    )
+    db.add(new_user)
+    db.flush()  # get new_user.id without committing
+
+    # Compute date_of_birth from age if provided
+    dob = None
+    if data.age:
+        birth_year = datetime.utcnow().year - data.age
+        dob = f"{birth_year}-01-01"
+
+    # Create Patient profile
+    new_patient = Patient(
+        user_id=new_user.id,
+        patient_code=patient_code,
+        date_of_birth=dob,
+        gender=data.gender,
+        blood_type=data.blood_type,
+        allergies=data.allergies,
+        chronic_conditions=data.chronic_conditions,
+    )
+    db.add(new_patient)
+    db.commit()
+    db.refresh(new_patient)
+    db.refresh(new_user)
+
+    # Log initial vitals if provided
+    if any([data.heart_rate, data.systolic_bp, data.oxygen_saturation]):
+        vital = VitalSign(
+            patient_id=new_patient.id,
+            recorded_by=current_user.id,
+            heart_rate=data.heart_rate,
+            systolic_bp=data.systolic_bp,
+            diastolic_bp=data.diastolic_bp,
+            oxygen_saturation=data.oxygen_saturation,
+            recorded_at=datetime.utcnow()
+        )
+        db.add(vital)
+        db.commit()
+        db.refresh(vital)
+        initial_vitals = {
+            "heart_rate": vital.heart_rate,
+            "systolic_bp": vital.systolic_bp,
+            "diastolic_bp": vital.diastolic_bp,
+            "oxygen_saturation": vital.oxygen_saturation,
+            "recorded_at": vital.recorded_at.isoformat()
+        }
+    else:
+        initial_vitals = None
+
+    # Index into RAG
+    index_document(db, "patient",
+        f"Patient {data.full_name} ({patient_code}): {data.gender}, {data.age or '?'}y. "
+        f"Conditions: {data.chronic_conditions or 'none'}. Allergies: {data.allergies or 'none'}.",
+        new_patient.id, {"added_by": current_user.full_name})
+
+    # Blockchain audit
+    add_block(db, "CREATE", "patient", new_patient.id, current_user.id, current_user.role,
+              {"patient_code": patient_code, "name": data.full_name, "added_by_nurse": current_user.full_name})
+
+    return {
+        "id": new_patient.id,
+        "patient_code": patient_code,
+        "full_name": new_user.full_name,
+        "gender": new_patient.gender,
+        "blood_type": new_patient.blood_type,
+        "allergies": new_patient.allergies,
+        "chronic_conditions": new_patient.chronic_conditions,
+        "latest_vitals": initial_vitals,
+        "message": f"Patient {data.full_name} added successfully"
+    }
+
+
 
 
 # ── Log vitals ────────────────────────────────────────────────
