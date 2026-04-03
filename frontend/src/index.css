@@ -6,6 +6,67 @@
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', 'Courier New', monospace;
 
+  /* Light palette (Default) */
+  --bg-primary: #f8fafc;
+  --bg-secondary: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f1f5f9;
+  --bg-elevated: #f8fafc;
+
+  /* Text */
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --text-inverse: #ffffff;
+
+  /* Accent colors */
+  --accent-cyan: #0891b2;
+  --accent-cyan-light: #06b6d4;
+  --accent-blue: #2563eb;
+  --accent-purple: #7c3aed;
+  --accent-emerald: #059669;
+  --accent-amber: #d97706;
+  --accent-rose: #e11d48;
+
+  /* Role colors */
+  --doctor-color: #0891b2;
+  --nurse-color: #059669;
+  --patient-color: #7c3aed;
+  --admin-color: #d97706;
+
+  /* Risk colors */
+  --risk-safe: #10b981;
+  --risk-adjust: #f59e0b;
+  --risk-toxic: #f43f5e;
+  --risk-ineffective: #8b5cf6;
+  --risk-unknown: #64748b;
+
+  /* Borders */
+  --border-subtle: rgba(15, 23, 42, 0.08);
+  --border-default: rgba(15, 23, 42, 0.15);
+  --border-strong: rgba(15, 23, 42, 0.3);
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.08);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.12);
+  --shadow-glow-cyan: 0 0 20px rgba(6,182,212,0.15);
+  --shadow-glow-blue: 0 0 20px rgba(59,130,246,0.15);
+
+  /* Spacing */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  /* Transitions */
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+  --transition-slow: 400ms ease;
+}
+
+.dark {
   /* Dark palette */
   --bg-primary: #0a0d14;
   --bg-secondary: #111827;
@@ -34,13 +95,6 @@
   --patient-color: #8b5cf6;
   --admin-color: #f59e0b;
 
-  /* Risk colors */
-  --risk-safe: #10b981;
-  --risk-adjust: #f59e0b;
-  --risk-toxic: #f43f5e;
-  --risk-ineffective: #8b5cf6;
-  --risk-unknown: #64748b;
-
   /* Borders */
   --border-subtle: rgba(148, 163, 184, 0.08);
   --border-default: rgba(148, 163, 184, 0.15);
@@ -52,18 +106,6 @@
   --shadow-lg: 0 8px 32px rgba(0,0,0,0.6);
   --shadow-glow-cyan: 0 0 20px rgba(6,182,212,0.25);
   --shadow-glow-blue: 0 0 20px rgba(59,130,246,0.25);
-
-  /* Spacing */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
-  --radius-full: 9999px;
-
-  /* Transitions */
-  --transition-fast: 150ms ease;
-  --transition-normal: 250ms ease;
-  --transition-slow: 400ms ease;
 }
 
 /* ── Reset & Base ───────────────────────────────────────────── */

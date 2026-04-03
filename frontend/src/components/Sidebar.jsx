@@ -2,6 +2,7 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import ThemeToggle from './ThemeToggle';
 
 const NAV_ITEMS = {
   doctor: [
@@ -102,6 +103,9 @@ export default function Sidebar() {
 
       {/* Footer */}
       <div className="sidebar-footer">
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+          <ThemeToggle />
+        </div>
         <div className="sidebar-user">
           <div className={`sidebar-avatar ${user.role}`}>{initials}</div>
           <div className="sidebar-user-info">

@@ -99,7 +99,7 @@ const allVariants =
   data?.pharmacogenomic_profile?.flatMap(gene =>
     gene.detected_variants?.map(variant => ({
       ...variant,
-      gene: gene.primary_gene
+      gene: variant.gene || gene.primary_gene
     })) || []
   ) || [];
 

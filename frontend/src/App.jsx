@@ -30,7 +30,10 @@ function RootRedirect() {
   return <Navigate to={`/${user.role}`} replace />;
 }
 
+import useDarkMode from './hooks/useDarkMode';
+
 export default function App() {
+  useDarkMode();
   return (
     <Routes>
       {/* Public */}

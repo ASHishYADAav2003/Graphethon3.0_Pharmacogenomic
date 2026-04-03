@@ -9,15 +9,7 @@ export const useDarkMode = () => {
         return storedPrefs;
       }
       
-      // Auto-switch based on time
-      const hour = new Date().getHours();
-      let defaultTheme = 'light';
-      // Between 7 PM (19) and 6 AM (6) -> dark mode
-      if (hour >= 19 || hour < 6) {
-        defaultTheme = 'dark';
-        setTimeout(() => console.log('Switched to Dark Mode (based on your local time)'), 100);
-      }
-      return defaultTheme;
+      return 'light';
     }
     
     return 'light'; // light theme as default
